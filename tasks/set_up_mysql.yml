@@ -1,0 +1,64 @@
+---
+- name: install mysql module for ansible
+  yum:
+    name: MySQL-python
+
+- name: delete anonymous user
+  mysql_user:
+    name: ""
+    host: "{{ item }}"
+    state: absent
+  with_items:
+    - localhost.localdomain
+    - localhost
+
+- name: change password for root user
+  mysql_user:
+    name: "root"
+    host: "{{ item }}"
+    password: "{{ mysql_5_6_root_password }}"
+  with_items:
+    - 127.0.0.1
+    - ::1
+    - localhost.localdomain
+    - localhost
+
+- name: create setting file to connect mysql for root user
+  template:
+    src: .my.cnf.j2
+    dest: "{{ mysql_5_6_defaults_file }}"
+    owner: root
+    group: root
+    mode: 0600
+
+- name: set database for application
+  mysql_db:
+    name: "{{ mysql_5_6_database_name }}"
+    encoding: utf8
+  when: mysql_5_6_database_name is defined
+
+- name: create no root user
+  mysql_user:
+    name: "{{ mysql_5_6_user_name }}"
+    host: "{{ item }}"
+    password: "{{ mysql_5_6_user_password }}"
+    priv: "{{ mysql_5_6_database_name }}.*:ALL,GRANT,REQUIRESSL"
+  with_items:
+    - "{{ mysql_5_6_user_host if mysql_5_6_user_host is defined else '%' }}"
+    - 127.0.0.1
+    - ::1
+    - localhost.localdomain
+    - localhost
+  when: mysql_5_6_user_name is defined and mysql_5_6_user_password is defined
+
+- name: set ssl settings and strict mode
+  blockinfile:
+    path: /etc/my.cnf
+    insertafter: "\\[mysqld\\]$"
+    block: |
+      ssl-ca = /etc/pki/CA/cacert.pem
+      ssl-cert = /etc/pki/tls/certs/servercert.pem
+      ssl-key = /etc/pki/tls/private/serverkey.pem
+      sql_mode = TRADITIONAL,NO_AUTO_VALUE_ON_ZERO,ONLY_FULL_GROUP_BY
+    marker: "# {mark} ANSIBLE MANAGED BLOCK SSL SETTING"
+  notify: restart mysql
